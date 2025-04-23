@@ -105,6 +105,8 @@ var scrapers = map[collector.Scraper]bool{
 	collector.ScrapeSlaveHosts{}:                          false,
 	collector.ScrapeReplicaHost{}:                         false,
 	collector.ScrapeRocksDBPerfContext{}:                  false,
+	collector.ScrapeHasPrimary{}:                          false,
+	collector.ScrapePrimaryHostId{}:                       false,
 }
 
 func filterScrapers(scrapers []collector.Scraper, collectParams []string) []collector.Scraper {
