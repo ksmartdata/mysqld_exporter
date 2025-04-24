@@ -118,6 +118,8 @@ func (ch *MySqlConfigHandler) ReloadConfig(filename string, mysqldAddress string
 		}
 	}
 
+	backwardCompatibility(cfg, logger)
+
 	cfg.ValueMapper = os.ExpandEnv
 	config := &Config{}
 	m := make(map[string]MySqlConfig)
@@ -152,6 +154,54 @@ func (ch *MySqlConfigHandler) ReloadConfig(filename string, mysqldAddress string
 	ch.Config = config
 	ch.Unlock()
 	return nil
+}
+
+func backwardCompatibility(cfg *ini.File, logger *slog.Logger) {
+	// Handle legacy DATA_SOURCE_NAME environment variable as fallback
+	// for backward compatibility
+	if dsn := os.Getenv("DATA_SOURCE_NAME"); dsn != "" {
+		// Only process if we have a client section
+		if clientSection := cfg.Section("client"); clientSection != nil {
+			// Always use DATA_SOURCE_NAME if it's set
+			// Parse DSN string
+			dsnCfg, dsnErr := mysql.ParseDSN(dsn)
+			if dsnErr == nil {
+				clientSection.Key("host").SetValue("127.0.0.1")
+				clientSection.Key("port").SetValue("3306")
+
+				// Override values from DSN regardless of whether they are already set
+				if dsnCfg.User != "" {
+					clientSection.Key("user").SetValue(dsnCfg.User)
+				}
+				if dsnCfg.Passwd != "" {
+					clientSection.Key("password").SetValue(dsnCfg.Passwd)
+				}
+
+				// Handle address based on network type
+				if dsnCfg.Net == "unix" {
+					// For unix socket format: user:@unix(/path/to/socket)/
+					clientSection.Key("socket").SetValue(dsnCfg.Addr)
+					// Clear host and port settings when socket is used
+				} else if dsnCfg.Net == "tcp" {
+					// For TCP format: user:password@(host:port)/
+					// Clear socket setting when TCP is used
+					clientSection.Key("socket").SetValue("")
+
+					hostPortParts := strings.Split(dsnCfg.Addr, ":")
+					if len(hostPortParts) > 0 && hostPortParts[0] != "" {
+						clientSection.Key("host").SetValue(hostPortParts[0])
+					}
+					if len(hostPortParts) > 1 && hostPortParts[1] != "" {
+						clientSection.Key("port").SetValue(hostPortParts[1])
+					}
+				}
+
+				logger.Info("Using connection parameters from DATA_SOURCE_NAME environment variable")
+			} else {
+				logger.Error("Could not parse DATA_SOURCE_NAME environment variable", "error", dsnErr)
+			}
+		}
+	}
 }
 
 func (m MySqlConfig) validateConfig() error {
